@@ -95,6 +95,17 @@ class TwitterDB:
 
         return []
 
+    def pull_keyword_entries_missing_fields(self):
+        try:
+            self.cur.execute("""SELECT tweet_id, tweet_text from twitter2 WHERE tweet_has_links is NULL LIMIT 10000""")
+            row = self.cur.fetchall()
+            if row:
+                return row
+        except Exception as e:
+            print("DB Error:" + str(e))
+
+        return []
+
     def write_calculations(self, db_data):
         try:
             print('Writing ' + str(len(db_data)) + ' records at ' + str(datetime.now().strftime('%m/%d/%Y %I:%M:%S%p')))
@@ -106,68 +117,3 @@ class TwitterDB:
     def finalize(self):
         self.cur.close()
         self.conn.close()
-
-
-class TwitterCache:
-    def __init__(self):
-        self.ACCESS_TOKEN = os.environ['ACCESS_TOKEN']
-        self.ACCESS_SECRET = os.environ['ACCESS_SECRET']
-        self.CONSUMER_KEY = os.environ['CONSUMER_KEY']
-        self.CONSUMER_SECRET = os.environ['CONSUMER_SECRET']
-        self.t = Twitter(retry=True, auth=OAuth(self.ACCESS_TOKEN, self.ACCESS_SECRET, self.CONSUMER_KEY, self.CONSUMER_SECRET))
-        self.db = TwitterDB()
-        self.count = 100
-        self.days = 3
-
-    def get_starting_date(self):
-        oldest_date = datetime.now() - timedelta(days=self.days)
-        oldest_date = oldest_date.strftime("%Y-%m-%d")
-        return oldest_date
-
-    def tweet_search(self, search_term, token_id='0', search_type='recent', restart=True):
-        if token_id == '0':
-            until = self.get_starting_date()
-            tweet_results = self.t.search.tweets(q=search_term + "' -filter:retweets AND -filter:replies'", until=until, result_type=search_type, count=self.count, lang='en', tweet_mode='extended')['statuses']
-        else:
-            tweet_results = self.t.search.tweets(q=search_term + "' -filter:retweets AND -filter:replies'", max_id=int(token_id) - 1, result_type=search_type, count=self.count, lang='en', tweet_mode='extended')['statuses']
-
-        if len(tweet_results) == 0 and restart:
-            print("No results for word (" + search_term + "), type (" + search_type + ") starting from Now() - # days")
-            return self.tweet_search(search_term, '0', search_type)
-
-        return tweet_results
-
-    @staticmethod
-    def read_common_words(file):
-        # Read common words
-        common_words_file = open(file, 'r')
-        words = common_words_file.readlines()
-        words = [x.strip() for x in words]
-        common_words_file.close()
-        return words
-
-    def run(self):
-        while True:
-            # Loop through top 100 common words
-            for word in self.read_common_words('10words.txt'):
-                # Find latest processed ID of the word from DB (Recent)
-                token_id = self.db.get_token(word)
-                tweet_results = self.tweet_search(word, token_id)
-                if tweet_results:
-                    self.db.write_db(word, tweet_results)
-
-            for word in self.read_common_words('15words.txt'):
-                # Find latest processed ID of the word from DB (Popular)
-                popular_id = self.db.get_popular_token(word)
-                if popular_id != 'Done':
-                    tweet_results = self.tweet_search(word, popular_id, 'popular', False)
-                    if tweet_results:
-                        self.db.write_db(word, tweet_results, False)
-                    else:
-                        self.db.write_db_done(word)
-
-
-if __name__ == '__main__':
-    # Main Execution
-    cache = TwitterCache()
-    cache.run()
